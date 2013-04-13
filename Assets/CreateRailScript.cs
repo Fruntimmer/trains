@@ -9,7 +9,7 @@ public class CreateRailScript : MonoBehaviour {
 
     IntersectionNode current_node = null;
     IntersectionNode current_train_node = null;
-    IntersectionNode snapPoint = null;
+    IntersectionNode snap_point = null;
 
     List<Train> t = new List<Train>();
     List<RailPiece> rail_pieces = new List<RailPiece>();
@@ -36,12 +36,11 @@ public class CreateRailScript : MonoBehaviour {
         RaycastHit hit;
         Ray ray = Camera.mainCamera.ScreenPointToRay(Input.mousePosition);
         int terrain_mask = 1 << 8;
-        snapPoint = null;
+        snap_point = null;
 
         if(Physics.Raycast(ray, out hit, Mathf.Infinity, terrain_mask))
         {
             IntersectionNode next_node = null;
-            IntersectionNode next_train_node = null;
             List<IntersectionNode> closestIntersections = null;
             if (intersections.Count > 0) {
                 closestIntersections = new List<IntersectionNode>(intersections);
@@ -51,7 +50,7 @@ public class CreateRailScript : MonoBehaviour {
                 {
 
                     next_node = closestIntersections[0];
-                    snapPoint = next_node;
+                    snap_point = next_node;
                 }
             }
 
@@ -59,86 +58,17 @@ public class CreateRailScript : MonoBehaviour {
             {
                 if (active_tool == "road")
                 {
-                    if (current_node == null)
-                    {
-                        if (closestIntersections != null)
-                        {
-                            if (Vector3.Distance(closestIntersections[0].position, hit.point) < 0.7f)
-                            {
-                                Debug.Log("Clicked a previous node!");
-                                current_node = closestIntersections[0];
-                            }
-                            else
-                            {
-                                current_node = new IntersectionNode(hit.point);
-                                intersections.Add(current_node);
-                            }
-                        }
-                        else
-                        {
-                            current_node = new IntersectionNode(hit.point);
-                            intersections.Add(current_node);
-                        }
-                    }
-                    else
-                    {
-                        if (next_node == null)
-                        {
-                            next_node = new IntersectionNode(hit.point);
-                        }
-
-                        intersections.Add(next_node);
-                        RailPiece rail = new RailPiece(current_node, next_node);
-                        rail_pieces.Add(rail);
-                        current_node = next_node;
-
-                        GameObject railObj = (GameObject) Instantiate(pRail, rail.start.position, Quaternion.identity);
-                        railObj.transform.LookAt(rail.end.position);
-                        railObj.transform.localScale = new Vector3(railObj.transform.localScale.x, .1f, rail.getLength());
-                        //Debug.Log((RailMeshScript)railObj.GetComponent("RailMeshScript"));
-                        ((RailMeshScript) railObj.transform.Find("Rail_GEO").GetComponent("RailMeshScript")).rail_piece
-                            = rail;
-                    }                  
+                    RoadTool(hit, next_node, closestIntersections);                  
                 }
-                if (active_tool == "train" && closestIntersections != null)
+                if (active_tool == "train" && snap_point != null)
                 {
-                    Debug.Log("Train Click!");
-                    if (current_train_node == null)
-                    {
-                        current_train_node = closestIntersections[0];
-                    }
-                    else
-                    {
-                        next_train_node = closestIntersections[0];
-
-                        //Create train and assign path
-                        AStar astar = new AStar();
-                        List<RailPiece> shortestPath = astar.GetPath(current_train_node, next_train_node);
-
-                        t.Add(new Train(shortestPath[0], current_train_node));
-                        t[t.Count - 1].path = shortestPath;
-
-                        next_train_node = null;
-                        current_train_node = null;
-                    }
+                    TrainTool();
                 }
                 //Reroute existing train
 
-                if(active_tool == "route")
+                if(active_tool == "route" && snap_point != null)
                 {
-                    if(current_train_node == null)
-                    {
-                        current_train_node = closestIntersections[0];
-                    }
-                    else
-                    {
-                        next_train_node = closestIntersections[0];
-                        
-                        AStar astar = new AStar();
-                        List<RailPiece> shortestPath = astar.GetPath(current_train_node, next_train_node);
-
-                        selectedTrain.path = shortestPath;
-                    }
+                    TrainTool();
                 }
             }
         }
@@ -146,15 +76,7 @@ public class CreateRailScript : MonoBehaviour {
         draw_signal_point = false;
         if(active_tool == "signal" && Physics.Raycast(ray, out hit, Mathf.Infinity, rail_layerMask))
         {
-            RailPiece rail_piece = ((RailMeshScript)hit.collider.gameObject.GetComponent("RailMeshScript")).rail_piece;
-            signal_point = ClosestPointOnLine(rail_piece.start.position, rail_piece.end.position, hit.point);
-            draw_signal_point = true;
-            
-            if(Input.GetMouseButtonDown(0))
-            {
-                rail_piece.signalsList.Add(new Signal(signal_point));
-                Debug.Log("Created Signal");
-            }
+            SignalTool(hit);
         }
 
         if (Input.GetKeyDown(KeyCode.T) && intersections.Count > 2)
@@ -191,6 +113,89 @@ public class CreateRailScript : MonoBehaviour {
         DebugDraw();
 	}
 
+    private void SignalTool(RaycastHit hit)
+    {
+        RailPiece rail_piece = ((RailMeshScript)hit.collider.gameObject.GetComponent("RailMeshScript")).rail_piece;
+        signal_point = ClosestPointOnLine(rail_piece.start.position, rail_piece.end.position, hit.point);
+        draw_signal_point = true;
+
+        if (Input.GetMouseButtonDown(0))
+        {
+            rail_piece.signals_list.Add(new Signal(signal_point));
+            Debug.Log("Created Signal");
+        }
+    }
+
+    private void TrainTool()
+    {
+        Debug.Log("Train Click!");
+        if (current_train_node == null)
+        {
+            current_train_node = snap_point;
+        }
+        else
+        {
+            //Create train and assign path
+            AStar astar = new AStar();
+            List<RailPiece> shortestPath = astar.GetPath(current_train_node, snap_point);
+
+            if (selectedTrain != null)
+            {
+                selectedTrain.path = shortestPath;
+            }
+            else
+            {
+                t.Add(new Train(shortestPath[0], current_train_node));
+                t[t.Count - 1].path = shortestPath;
+            }
+            current_train_node = null;
+        }
+    }
+
+    private void RoadTool(RaycastHit hit, IntersectionNode next_node, List<IntersectionNode> closestIntersections)
+    {
+        if (current_node == null)
+        {
+            if (closestIntersections != null)
+            {
+                if (Vector3.Distance(closestIntersections[0].position, hit.point) < 0.7f)
+                {
+                    Debug.Log("Clicked a previous node!");
+                    current_node = closestIntersections[0];
+                }
+                else
+                {
+                    current_node = new IntersectionNode(hit.point);
+                    intersections.Add(current_node);
+                }
+            }
+            else
+            {
+                current_node = new IntersectionNode(hit.point);
+                intersections.Add(current_node);
+            }
+        }
+        else
+        {
+            if (next_node == null)
+            {
+                next_node = new IntersectionNode(hit.point);
+            }
+
+            intersections.Add(next_node);
+            RailPiece rail = new RailPiece(current_node, next_node);
+            rail_pieces.Add(rail);
+            current_node = next_node;
+
+            GameObject railObj = (GameObject)Instantiate(pRail, rail.start.position, Quaternion.identity);
+            railObj.transform.LookAt(rail.end.position);
+            railObj.transform.localScale = new Vector3(railObj.transform.localScale.x, .1f, rail.getLength());
+            //Debug.Log((RailMeshScript)railObj.GetComponent("RailMeshScript"));
+            ((RailMeshScript)railObj.transform.Find("Rail_GEO").GetComponent("RailMeshScript")).rail_piece
+                = rail;
+        }
+    }
+
     void OnDrawGizmos()
     {
         if (t.Count > 0)
@@ -201,10 +206,10 @@ public class CreateRailScript : MonoBehaviour {
             }
         }
 
-        if (snapPoint != null)
+        if (snap_point != null)
         {
             Gizmos.color = Color.green;
-            Gizmos.DrawWireCube(snapPoint.position, new Vector3(0.5f, 0.5f, 0.5f));
+            Gizmos.DrawWireCube(snap_point.position, new Vector3(0.5f, 0.5f, 0.5f));
         }
 
         if (draw_signal_point)
@@ -215,9 +220,9 @@ public class CreateRailScript : MonoBehaviour {
         foreach (RailPiece rail in rail_pieces)
         {
             //rail.DebugDraw();
-            if (rail.signalsList.Count > 0)
+            if (rail.signals_list.Count > 0)
             {
-                foreach (Signal currSignal in rail.signalsList)
+                foreach (Signal currSignal in rail.signals_list)
                 {
                     currSignal.OnDrawGizmos();
                 }
@@ -237,9 +242,9 @@ public class CreateRailScript : MonoBehaviour {
             }
         }
 
-        if (snapPoint != null)
+        if (snap_point != null)
         {
-            snapPoint.neighbors.ForEach(rail_piece => rail_piece.DebugDraw(Color.red));
+            snap_point.neighbors.ForEach(rail_piece => rail_piece.DebugDraw(Color.red));
         }
     }
 

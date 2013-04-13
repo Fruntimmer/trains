@@ -69,7 +69,7 @@ public class Train {
     {
         //closestIntersections.Sort((left, right) => Vector3.Distance(left.position, hit.point) < Vector3.Distance(right.position, hit.point) ? -1 : 1);
         Debug.Log("Ordering signal list");
-        List<Signal> signalsOrdered = new List<Signal>(rail_piece.signalsList);
+        List<Signal> signalsOrdered = new List<Signal>(rail_piece.signals_list);
         if (signalsOrdered.Count > 0)
         {
             currentSignalList.Sort(
@@ -186,7 +186,7 @@ public class Train {
 public class RailPiece
 {
     public IntersectionNode start, end;
-    public List<Signal> signalsList = new List<Signal>();
+    public List<Signal> signals_list = new List<Signal>();
     public float signalCost = 0;
     public RailPiece(IntersectionNode start, IntersectionNode end)
     {
