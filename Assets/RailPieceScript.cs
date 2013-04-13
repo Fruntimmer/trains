@@ -19,6 +19,37 @@ public class IntersectionNode
             neighbors.Add(neighbor);
         }
     }
+
+    public void TrainEnter(List<Signal> busy_signals)
+    {
+        TrainEnter(new List<IntersectionNode>(), busy_signals);
+    }
+
+    public void TrainEnter(List<IntersectionNode> visited, List<Signal> busy_signals)
+    {
+        visited.Add(this);
+        foreach (RailPiece neighbor in neighbors)
+        {
+            bool keep_searching = true;
+            if (neighbor.start == this)
+            {
+                if (visited.Contains(neighbor.end))
+                {
+                    keep_searching = false;
+                }
+            }
+            else
+            {
+                if (visited.Contains(neighbor.start))
+                {
+                    keep_searching = false;
+                }
+            }
+            neighbor.TrainEnter(this, visited, busy_signals, keep_searching);
+        }
+
+        
+    }
 }
 public class Signal
 {
@@ -28,9 +59,9 @@ public class Signal
     {
         this.position = position;
     }
-    public Vector3 Position()
+    public Vector3 Position
     {
-        return this.position;
+        get { return this.position;}
     }
     public void OnDrawGizmos()
     {
@@ -53,38 +84,79 @@ public class Train {
     float speed = 0.1f;
     float baseSpeed = 0.1f;
     IntersectionNode going_from;
+    bool going_from_start = true;
+    List<Signal> previous_signals = new List<Signal>();
 
-    private Signal previousSignal;
-    private Signal nextSignal;
-    private List<Signal> currentSignalList = new List<Signal>();
+    int current_signal_iterator = -1;
 
     public Train(RailPiece rail_piece, IntersectionNode going_from)
     {
         this.rail_piece = rail_piece;
         this.going_from = going_from;
-        currentSignalList = GetSignalList();
+        going_from_start = going_from == rail_piece.start ? true : false;
+        if (going_from_start)
+        {
+            current_signal_iterator = 0;
+        }
+        else
+        {
+            current_signal_iterator = rail_piece.signals_list.Count - 1;
+        }
+
+        if (getNextSignal() != null)
+        {
+            getNextSignal().busy = true;
+            previous_signals.Add(getNextSignal());
+        }
+
+        this.going_from.TrainEnter(previous_signals);
     }
 
-    List<Signal> GetSignalList()
+    Signal getNextSignal()
     {
-        //closestIntersections.Sort((left, right) => Vector3.Distance(left.position, hit.point) < Vector3.Distance(right.position, hit.point) ? -1 : 1);
-        Debug.Log("Ordering signal list");
-        List<Signal> signalsOrdered = new List<Signal>(rail_piece.signals_list);
-        if (signalsOrdered.Count > 0)
-        {
-            currentSignalList.Sort(
-                (left, right) =>
-                Vector3.Distance(left.Position(), this.getPosition()) <
-                Vector3.Distance(right.Position(), this.getPosition())
-                    ? -1
-                    : 1);
-            return signalsOrdered;
+        if (rail_piece.signals_list.Count == 0 || current_signal_iterator < 0 || current_signal_iterator > rail_piece.signals_list.Count - 1) {
+            return null;
         }
-        return signalsOrdered;
+        return rail_piece.signals_list[current_signal_iterator];
     }
+
+    void incrementSignalIterator()
+    {
+        if (going_from_start)
+        {
+            current_signal_iterator++;
+        }
+        else
+        {
+            current_signal_iterator--;
+        }
+    }
+
+    Signal passedSignal()
+    {
+        if (getNextSignal() != null)
+        {
+            if (going_from_start)
+            {
+                if (Vector3.Distance(getPosition(), rail_piece.start.position) >= Vector3.Distance(getNextSignal().Position, rail_piece.start.position))
+                {
+                    return getNextSignal();
+                }
+            }
+            else
+            {
+                if (Vector3.Distance(getPosition(), rail_piece.end.position) >= Vector3.Distance(getNextSignal().Position, rail_piece.end.position))
+                {
+                    return getNextSignal();
+                }
+            }
+        }
+        return null;
+    }
+
     Vector3 getPosition()
     {
-        if (going_from == rail_piece.start)
+        if (going_from_start)
         {
             return rail_piece.start.position + rail_piece.getNormalizedVector() * distance_from_source;
         }
@@ -94,26 +166,16 @@ public class Train {
         }
     }
 
-    Signal GetClosestSignal()
-    {      
-        Signal closestSignal = new Signal(Vector3.zero);
-        float closestDist = 1000;
-        foreach (Signal signal in currentSignalList)
-        {
-            float dist = Vector3.Distance(this.getPosition(), signal.Position());
-            if (dist < closestDist)
-            {
-                closestDist = dist;
-                closestSignal = signal;
-            }
-        }
-        //Signal closestSignal = currentSignalList[0]; <= This should be enough since the list is ordered. Doesn't work when train turns around
-        return closestSignal;
-    }
     public void OnDrawGizmos()
     {
         Gizmos.color = Color.red;
         Gizmos.DrawWireCube(getPosition(), new Vector3(0.5f, 0.5f, 0.5f));
+
+        Gizmos.color = Color.yellow;
+        foreach (Signal previous in previous_signals)
+        {
+            Gizmos.DrawWireCube(previous.Position, new Vector3(0.4f, 0.4f, 0.4f));
+        }
     }
 
     public void DebugDraw()
@@ -133,52 +195,65 @@ public class Train {
         distance_from_source += speed;
         if (distance_from_source >= rail_piece.getLength())
         {
-            // Check if the new path segment is still valid
-            pathSegment++;
-            if (pathSegment == path.Count)
-            {
-                path.Reverse();
-                pathSegment = 0;
-            }
-            IntersectionNode nextIntersection = going_from == rail_piece.start ? rail_piece.end : rail_piece.start;
-            going_from = nextIntersection;
-            rail_piece = path[pathSegment];
-            distance_from_source = 0;
-            
-            nextSignal = null;
-            currentSignalList = GetSignalList();
+            AdvanceToNewRailPiece();
         }
-        if(currentSignalList.Count > 0)
+
+        Signal passed_signal = passedSignal();
+        if (passed_signal != null)
         {
-            if(nextSignal == null)
-            {
-                Debug.Log("Getting closest signal");
-                nextSignal = GetClosestSignal();
-                //nextSignal.busy = true;
+            foreach(Signal previous_signal in previous_signals){
+                previous_signal.busy = false;
             }
-            //Makes trains stop if the next signal is busy. Only works on the same railpiece since that's what currentSignalsList contains.
-            /*
-            if(nextSignal.busy == true && nextSignal != previousSignal)
+            previous_signals.Clear();
+            previous_signals.Add(getNextSignal());
+            getNextSignal().busy = true;
+
+            incrementSignalIterator();
+            if (getNextSignal() != null)
             {
-                speed = 0;
+                getNextSignal().busy = true;
+                //previous_signals.Add(getNextSignal());
             }
             else
             {
-                speed = baseSpeed;
-            }
-            */
-            if(Vector3.Distance(this.getPosition(), nextSignal.Position())<0.5f) //Very very poopy. Yes sir. If train goes to fast it will miss. Entirely scale dependant.
-            {
-                if(previousSignal != null)
+                List<IntersectionNode> no_go = new List<IntersectionNode>();
+                if (going_from_start)
                 {
-                    previousSignal.busy = false;
+                    //no_go.Add(rail_piece.start);
+                    rail_piece.end.TrainEnter(no_go, previous_signals);
                 }
-                previousSignal = nextSignal;
-                previousSignal.busy = true;
-                rail_piece.signalCost += 10000;
-                currentSignalList.Remove(nextSignal);
-                nextSignal = null;
+                else
+                {
+                    //no_go.Add(rail_piece.end);
+                    rail_piece.start.TrainEnter(no_go, previous_signals);
+                }
             }
+        }
+    }
+
+    private void AdvanceToNewRailPiece()
+    {
+        // Check if the new path segment is still valid
+        pathSegment++;
+        if (pathSegment == path.Count)
+        {
+            path.Reverse();
+            pathSegment = 0;
+        }
+        IntersectionNode nextIntersection = going_from_start ? rail_piece.end : rail_piece.start;
+        going_from = nextIntersection;
+        rail_piece = path[pathSegment];
+        going_from_start = going_from == rail_piece.start ? true : false;
+
+        distance_from_source = 0;
+
+        if (going_from_start)
+        {
+            current_signal_iterator = 0;
+        }
+        else
+        {
+            current_signal_iterator = rail_piece.signals_list.Count - 1;
         }
     }
 }
@@ -194,6 +269,17 @@ public class RailPiece
         this.end = end;
         start.AddNeighbor(this);
         end.AddNeighbor(this);
+    }
+
+    public void AddSignal(Signal signal)
+    {
+        signals_list.Add(signal);
+        signals_list.Sort(
+            (left, right) =>
+            Vector3.Distance(left.Position, this.start.position) <
+            Vector3.Distance(right.Position, this.start.position)
+                ? -1
+                : 1);
     }
 
     public void DebugDraw()
@@ -224,40 +310,40 @@ public class RailPiece
         start.signalCost = this.signalCost;
         end.signalCost = this.signalCost;
     }
+
+    internal void TrainEnter(IntersectionNode from_node, List<IntersectionNode> visited, List<Signal> busy_signals, bool keep_searching)
+    {
+        if (signals_list.Count > 0)
+        {
+            if (start == from_node)
+            {
+                signals_list[0].busy = true;
+                busy_signals.Add(signals_list[0]);
+                return;
+            }
+            else
+            {
+                signals_list[signals_list.Count - 1].busy = true;
+                busy_signals.Add(signals_list[signals_list.Count - 1]);
+                return;
+            }
+        }
+        else
+        {
+            if (keep_searching)
+            {
+                if (start == from_node)
+                {
+                    end.TrainEnter(visited, busy_signals);
+                }
+                else
+                {
+                    start.TrainEnter(visited, busy_signals);
+                }
+            }
+        }
+    }
 }
 
 public class RailPieceScript : MonoBehaviour {
-
-    RailPiece rp,rp2;
-    Train t;
-	// Use this for initialization
-    /*
-	void Start () {
-        IntersectionNode startNode = new IntersectionNode(new Vector3(0, 0, 0));
-        IntersectionNode endNode = new IntersectionNode(new Vector3(10, 0, 2));
-        IntersectionNode intersection = new IntersectionNode(new Vector3(10,0,0));
-        rp = new RailPiece(startNode, intersection);
-        rp2 = new RailPiece(intersection, endNode);
-        t = new Train(rp, startNode);
-	}
-
-    void DebugDraw()
-    {
-        rp.DebugDraw();
-        rp2.DebugDraw();
-    }
-
-    void OnDrawGizmos()
-    {
-        if (t != null)
-        {
-            t.OnDrawGizmos();
-        }
-    }
-
-	// Update is called once per frame
-	void Update () {
-        t.Update();
-        DebugDraw();
-	}*/
 }

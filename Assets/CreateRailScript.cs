@@ -79,7 +79,7 @@ public class CreateRailScript : MonoBehaviour {
             SignalTool(hit);
         }
 
-        if (Input.GetKeyDown(KeyCode.T) && intersections.Count > 2)
+        if (Input.GetKeyDown(KeyCode.T) && intersections.Count >= 2)
         {
             Debug.Log("Train mode!");
             active_tool = "train";
@@ -121,7 +121,7 @@ public class CreateRailScript : MonoBehaviour {
 
         if (Input.GetMouseButtonDown(0))
         {
-            rail_piece.signals_list.Add(new Signal(signal_point));
+            rail_piece.AddSignal(new Signal(signal_point));
             Debug.Log("Created Signal");
         }
     }
