@@ -7,6 +7,7 @@ public class IntersectionNode
     public Vector3 position;
     public float signalCost = 0;
     public List<RailPiece> neighbors = new List<RailPiece>();
+    
     public IntersectionNode(Vector3 position)
     {
         this.position = position;
@@ -290,7 +291,9 @@ public class RailPiece
     public IntersectionNode start, end;
     public List<Signal> signals_list = new List<Signal>();
     public float signalCost = 0;
-    public RailPiece(IntersectionNode start, IntersectionNode end)
+    public GameObject collisionMesh;
+
+    public RailPiece(IntersectionNode start, IntersectionNode end)    
     {
         this.start = start;
         this.end = end;

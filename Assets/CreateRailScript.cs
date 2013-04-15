@@ -17,8 +17,8 @@ public class CreateRailScript : MonoBehaviour {
     
     
     string active_tool = "road";
-    Vector3 signal_point = Vector3.zero;
-    bool draw_signal_point = false;
+    Vector3 previz_point = Vector3.zero;
+    bool draw_previz_point = false;
 
     //GUI variables
     private float bHeight = 50;
@@ -35,7 +35,7 @@ public class CreateRailScript : MonoBehaviour {
 	void Update () {
         RaycastHit hit;
         Ray ray = Camera.mainCamera.ScreenPointToRay(Input.mousePosition);
-        int terrain_mask = 1 << 8;
+        int terrain_mask = 1 << 8 | 1 << 9;
         snap_point = null;
 
         if(Physics.Raycast(ray, out hit, Mathf.Infinity, terrain_mask))
@@ -48,24 +48,23 @@ public class CreateRailScript : MonoBehaviour {
 
                 if (Vector3.Distance(closestIntersections[0].position, hit.point) < 0.7f)
                 {
-
                     next_node = closestIntersections[0];
                     snap_point = next_node;
                 }
             }
 
+
             if (Input.GetMouseButtonDown(0))
             {
                 if (active_tool == "road")
                 {
-                    RoadTool(hit, next_node, closestIntersections);                  
+                    RoadTool(hit, next_node, closestIntersections);
                 }
                 if (active_tool == "train" && snap_point != null)
                 {
                     TrainTool();
                 }
                 //Reroute existing train
-
                 if(active_tool == "route" && snap_point != null)
                 {
                     TrainTool();
@@ -73,25 +72,33 @@ public class CreateRailScript : MonoBehaviour {
             }
         }
         int rail_layerMask = 1 << 9;
-        draw_signal_point = false;
-        if(active_tool == "signal" && Physics.Raycast(ray, out hit, Mathf.Infinity, rail_layerMask))
+        draw_previz_point = false;
+        //Draws "cursor" for potential signal or railpiece to be placed on existing rail.
+        if((active_tool == "signal" || active_tool == "road") && Physics.Raycast(ray, out hit, Mathf.Infinity, rail_layerMask))
         {
-            SignalTool(hit);
+            DrawPreviz(hit);
+            //Calls function to place signals
+            if (active_tool == "signal")
+            {
+                SignalTool(hit);
+            }
         }
 
         if (Input.GetKeyDown(KeyCode.T) && intersections.Count >= 2)
         {
-            Debug.Log("Train mode!");
+            Debug.Log("Train Tool");
             active_tool = "train";
         }
 
         if (Input.GetKeyDown(KeyCode.R))
         {
             current_node = null;
+            Debug.Log("Road Tool");
             active_tool = "road";
         }
         else if (Input.GetKeyDown(KeyCode.S))
         {
+            Debug.Log("Signal Tool");
             active_tool = "signal";
         }
 
@@ -113,15 +120,19 @@ public class CreateRailScript : MonoBehaviour {
         DebugDraw();
 	}
 
-    private void SignalTool(RaycastHit hit)
+    private void DrawPreviz(RaycastHit hit)
     {
         RailPiece rail_piece = ((RailMeshScript)hit.collider.gameObject.GetComponent("RailMeshScript")).rail_piece;
-        signal_point = ClosestPointOnLine(rail_piece.start.position, rail_piece.end.position, hit.point);
-        draw_signal_point = true;
+        previz_point = ClosestPointOnLine(rail_piece.start.position, rail_piece.end.position, hit.point);
+        draw_previz_point = true;
+    }
 
+    private void SignalTool(RaycastHit hit)
+    {
         if (Input.GetMouseButtonDown(0))
         {
-            rail_piece.AddSignal(new Signal(signal_point));
+            RailPiece rail_piece = ((RailMeshScript)hit.collider.gameObject.GetComponent("RailMeshScript")).rail_piece;
+            rail_piece.AddSignal(new Signal(ClosestPointOnLine(rail_piece.start.position, rail_piece.end.position, hit.point)));
             Debug.Log("Created Signal");
         }
     }
@@ -154,46 +165,96 @@ public class CreateRailScript : MonoBehaviour {
 
     private void RoadTool(RaycastHit hit, IntersectionNode next_node, List<IntersectionNode> closestIntersections)
     {
+        //If we don't have a start point
         if (current_node == null)
         {
-            if (closestIntersections != null)
+            if (hit.collider.tag == "Rail")
             {
-                if (Vector3.Distance(closestIntersections[0].position, hit.point) < 0.7f)
+                if (closestIntersections != null)
                 {
-                    Debug.Log("Clicked a previous node!");
-                    current_node = closestIntersections[0];
-                }
-                else
-                {
-                    current_node = new IntersectionNode(hit.point);
-                    intersections.Add(current_node);
+                    //If we click on an intersection
+                    if (Vector3.Distance(closestIntersections[0].position, hit.point) < 1.0f)
+                    {
+                        Debug.Log("Clicked a previous node!");
+                        current_node = closestIntersections[0];
+                    }
+                    //If we click on a rail but not near a intersection, we create an intersection.
+                    else
+                    {
+                        RailPiece rail_piece = ((RailMeshScript)hit.collider.gameObject.GetComponent("RailMeshScript")).rail_piece;
+                        current_node = CreateIntersection(rail_piece, ClosestPointOnLine(rail_piece.start.position, rail_piece.end.position, hit.point));
+                        intersections.Add(current_node);
+                    }
                 }
             }
+            //If we click on nothing at all
             else
             {
                 current_node = new IntersectionNode(hit.point);
                 intersections.Add(current_node);
             }
         }
+        //If we already have a start point
         else
         {
             if (next_node == null)
             {
-                next_node = new IntersectionNode(hit.point);
+                //If we click on a rail
+                if(hit.collider.tag == "Rail")
+                {
+                    RailPiece rail_piece = ((RailMeshScript)hit.collider.gameObject.GetComponent("RailMeshScript")).rail_piece;
+                    next_node = CreateIntersection(rail_piece, ClosestPointOnLine(rail_piece.start.position, rail_piece.end.position, hit.point));
+                }
+                else
+                {
+                    next_node = new IntersectionNode(hit.point);
+                }
             }
 
             intersections.Add(next_node);
-            RailPiece rail = new RailPiece(current_node, next_node);
-            rail_pieces.Add(rail);
-            current_node = next_node;
 
-            GameObject railObj = (GameObject)Instantiate(pRail, rail.start.position, Quaternion.identity);
-            railObj.transform.LookAt(rail.end.position);
-            railObj.transform.localScale = new Vector3(railObj.transform.localScale.x, .1f, rail.getLength());
-            //Debug.Log((RailMeshScript)railObj.GetComponent("RailMeshScript"));
-            ((RailMeshScript)railObj.transform.Find("Rail_GEO").GetComponent("RailMeshScript")).rail_piece
-                = rail;
+            CreateRail(current_node, next_node);
+            current_node = next_node;
         }
+    }
+    
+    void CreateRail(IntersectionNode current_node, IntersectionNode next_node)
+    {
+        RailPiece rail = new RailPiece(current_node, next_node);
+        rail_pieces.Add(rail);
+        
+        GameObject railObj = (GameObject)Instantiate(pRail, rail.start.position, Quaternion.identity);
+        railObj.transform.LookAt(rail.end.position);
+        railObj.transform.localScale = new Vector3(railObj.transform.localScale.x, .1f, rail.getLength());
+        ((RailMeshScript)railObj.transform.Find("Rail_GEO").GetComponent("RailMeshScript")).rail_piece = rail;
+
+        rail.collisionMesh = railObj;
+    }
+
+    IntersectionNode CreateIntersection(RailPiece rail, Vector3 point)
+    {
+        IntersectionNode split = new IntersectionNode(point);
+        intersections.Add(split);
+
+        if (rail.start.neighbors.Count <= 1)
+            intersections.Remove(rail.start);
+
+        if (rail.end.neighbors.Count <= 1)
+            intersections.Remove(rail.end);
+
+        CreateRail(rail.start, split);
+        intersections.Add(rail.start);
+        
+        CreateRail(split, rail.end);
+        intersections.Add(rail.end);
+
+        rail.end.neighbors.Remove(rail);
+        rail.start.neighbors.Remove(rail);
+        
+        Destroy(rail.collisionMesh);
+        rail_pieces.Remove(rail);
+
+        return split;
     }
 
     void OnDrawGizmos()
@@ -212,10 +273,13 @@ public class CreateRailScript : MonoBehaviour {
             Gizmos.DrawWireCube(snap_point.position, new Vector3(0.5f, 0.5f, 0.5f));
         }
 
-        if (draw_signal_point)
+        if (draw_previz_point)
         {
-            Gizmos.color = Color.blue;
-            Gizmos.DrawWireCube(signal_point, new Vector3(0.5f, 0.5f, 0.5f));
+            if (active_tool == "signal")
+                Gizmos.color = Color.blue;
+            else if (active_tool == "road")
+                Gizmos.color = Color.yellow;
+            Gizmos.DrawWireCube(previz_point, new Vector3(0.5f, 0.5f, 0.5f));
         }
         foreach (RailPiece rail in rail_pieces)
         {
@@ -254,7 +318,7 @@ public class CreateRailScript : MonoBehaviour {
         {
             foreach (Train train in t)
             {
-                if (GUI.Button(new Rect(750, 250 + lHeight, bWidth, bHeight), "Train"))
+                if (GUI.Button(new Rect(Screen.width-140, 250 + lHeight, bWidth, bHeight), "Train"))
                 {
                     active_tool = "route";
                     selectedTrain = train;
